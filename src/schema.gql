@@ -1,0 +1,12 @@
+type Query {
+  note(id: String!): Note!
+  notes: [Note!]!
+}
+
+type Note {
+  id: String!
+  title: String
+  createDate: String!
+  modifyDate: String!
+  content: String
+}
