@@ -25,6 +25,9 @@ dependencies:
   - text
   - bytestring
   - scotty
+  - mongoDB
+  - mtl
+  - bson
 
 library:
   source-dirs: src
