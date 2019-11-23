@@ -13,7 +13,6 @@ module Schema
     )
 where
 
-import           Data.Typeable
 import           Data.Morpheus.Types            ( GQLType(..)
                                                 , IORes
                                                 , liftEitherM
@@ -24,13 +23,14 @@ import qualified Database.MongoDB              as DB
 import           Data.Data                      ( Constr
                                                 , constrFields
                                                 )
+import           Control.Monad.Identity
 import           Data.Text                      ( Text )
 import           Data.Bson                      ( Value
                                                 , valueAt
                                                 , typed
                                                 )
 
-data Query m = Query { note :: NoteArgs -> m [Note]
+data Query m = Query { note :: NoteArgs -> m Note
                      , notes :: () -> m [Note]
                      } deriving (Generic, GQLType)
 
@@ -44,36 +44,47 @@ data Note = Note { noteId :: Text
 instance GQLType Note where
     type KIND Note = OBJECT
 
-data NoteArgs = NoteArgs { noteTitle :: Maybe Text
-                         , noteCreateDate :: Maybe Text
+data NoteArgs = NoteArgs { nTitle :: Maybe Text
+                         , nId :: Maybe Text
                          } deriving (Show, Generic)
 
-resolveNote :: NoteArgs -> IORes e [Note]
-resolveNote NoteArgs { noteTitle, noteCreateDate } =
-    liftEitherM $ runQuery $ getNoteByProp noteTitle noteCreateDate
+resolveNote :: NoteArgs -> IORes e Note
+resolveNote NoteArgs { nTitle, nId } =
+    liftEitherM $ fmap (fmap runIdentity) $ runQuery $ getNoteByProp nTitle nId
 
 resolveNotes :: () -> IORes () [Note]
 resolveNotes () = liftEitherM $ runQuery getAllNotes
 
--- what if this used Applicative / Monad m in stead of [a],
--- we could potentially just <$> the results
-runQuery :: DB.Action IO [a] -> IO (Either String [a])
+runQuery
+    :: (Monad m)
+    => DB.Action IO (Either String (m a))
+    -> IO (Either String (m a))
 runQuery act = do
     pipe <- DB.connect (DB.host "127.0.0.1")
     e    <- DB.access pipe DB.master "notes" act
     DB.close pipe
-    return $ Right e
+    return e
 
-getAllNotes :: DB.Action IO [Note]
-getAllNotes = fmap (map docToNote) (DB.rest =<< DB.find (DB.select [] "notes"))
+getAllNotes :: DB.Action IO (Either String [Note])
+getAllNotes =
+    Right <$> fmap (map docToNote) (DB.rest =<< DB.find (DB.select [] "notes"))
 
-getNoteByProp :: Maybe Text -> Maybe Text -> DB.Action IO [Note]
-getNoteByProp title cDate =
-    map docToNote . dbResultFromMaybe <$> DB.findOne (DB.select [] "notes")
+getNoteByProp
+    :: Maybe Text -> Maybe Text -> DB.Action IO (Either String (Identity Note))
+getNoteByProp title noteId =
+    fmap (fmap docToNote) . dbDocFromMaybe <$> DB.findOne
+        (DB.select (makeSelector title noteId) "notes")
+  where
+    makeSelector (Just title') (Just id') =
+        ["title" DB.=: title', "noteId" DB.=: id']
+    makeSelector Nothing       (Just id') = ["noteId" DB.=: id']
+    makeSelector (Just title') Nothing    = ["title" DB.=: title']
+    makeSelector Nothing       Nothing    = []
 
-dbResultFromMaybe :: Maybe DB.Document -> [DB.Document]
-dbResultFromMaybe (Just doc) = [doc]
-dbResultFromMaybe Nothing    = []
+
+dbDocFromMaybe :: Maybe DB.Document -> Either String (Identity DB.Document)
+dbDocFromMaybe (Just doc) = Right $ return doc
+dbDocFromMaybe Nothing    = Left "No result found"
 
 docToNote :: DB.Document -> Note
 docToNote doc = Note { noteId     = docId
