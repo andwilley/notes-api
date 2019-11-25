@@ -7,10 +7,11 @@
 {-# LANGUAGE TypeFamilies          #-}
 
 module Schema
-    ( Query(..)
-    , resolveNote
-    , resolveNotes
-    )
+  ( Query(..)
+  , Mutation(..)
+  , getNote
+  , getNotes
+  )
 where
 
 import           Data.Morpheus.Types            ( GQLType(..)
@@ -30,9 +31,18 @@ import           Data.Bson                      ( Value
                                                 , typed
                                                 )
 
+-- infix is awkward with a qualifier
+(=:) :: DB.Val v => DB.Label -> v -> DB.Field
+(=:) = (DB.=:)
+
 data Query m = Query { note :: NoteArgs -> m Note
                      , notes :: () -> m [Note]
                      } deriving (Generic, GQLType)
+
+data Mutation m = Mutation { addNote :: Note -> m Note
+                           , updateNote :: Note -> m Note
+                           , deleteNote :: Text -> m Note
+                           } deriving (Generic, GQLType)
 
 data Note = Note { noteId :: Text
                  , title   :: Text
@@ -42,49 +52,49 @@ data Note = Note { noteId :: Text
                  } deriving (Generic)
 
 instance GQLType Note where
-    type KIND Note = OBJECT
+  type KIND Note = OBJECT
 
 data NoteArgs = NoteArgs { nTitle :: Maybe Text
                          , nId :: Maybe Text
                          } deriving (Show, Generic)
 
-resolveNote :: NoteArgs -> IORes e Note
-resolveNote NoteArgs { nTitle, nId } =
-    liftEitherM $ fmap (fmap runIdentity) $ runQuery $ getNoteByProp nTitle nId
+getNote :: NoteArgs -> IORes e Note
+getNote NoteArgs { nTitle, nId } = liftEitherM $ do
+  eitherNote <- runQuery $ getNoteByProp nTitle nId
+  return $ runIdentity <$> eitherNote
 
-resolveNotes :: () -> IORes () [Note]
-resolveNotes () = liftEitherM $ runQuery getAllNotes
+getNotes :: () -> IORes () [Note]
+getNotes () = liftEitherM $ runQuery getAllNotes
 
 runQuery
-    :: (Monad m)
-    => DB.Action IO (Either String (m a))
-    -> IO (Either String (m a))
+  :: (Monad m) => DB.Action IO (Either String (m a)) -> IO (Either String (m a))
 runQuery act = do
-    pipe <- DB.connect (DB.host "127.0.0.1")
-    e    <- DB.access pipe DB.master "notes" act
-    DB.close pipe
-    return e
+  pipe <- DB.connect (DB.host "127.0.0.1")
+  e    <- DB.access pipe DB.master "notes" act
+  DB.close pipe
+  return e
 
 getAllNotes :: DB.Action IO (Either String [Note])
-getAllNotes =
-    Right <$> fmap (map docToNote) (DB.rest =<< DB.find (DB.select [] "notes"))
+getAllNotes = do
+  noteDocList <- DB.rest =<< DB.find (DB.select [] "notes")
+  return $ Right $ map docToNote noteDocList
 
 getNoteByProp
-    :: Maybe Text -> Maybe Text -> DB.Action IO (Either String (Identity Note))
-getNoteByProp title noteId =
-    fmap (fmap docToNote) . dbDocFromMaybe <$> DB.findOne
-        (DB.select (makeSelector title noteId) "notes")
-  where
-    makeSelector (Just title') (Just id') =
-        ["title" DB.=: title', "noteId" DB.=: id']
-    makeSelector Nothing       (Just id') = ["noteId" DB.=: id']
-    makeSelector (Just title') Nothing    = ["title" DB.=: title']
-    makeSelector Nothing       Nothing    = []
+  :: Maybe Text -> Maybe Text -> DB.Action IO (Either String (Identity Note))
+getNoteByProp title noteId = do -- inside the Action IO monad
+  maybeNoteDoc <- DB.findOne (DB.select (makeSelector title noteId) "notes")
+  return $ do -- inside the Either monad
+    idDoc <- eitherDocFromMaybe maybeNoteDoc
+    return $ docToNote <$> idDoc
+ where
+  makeSelector (Just title') (Just id') = ["title" =: title', "noteId" =: id']
+  makeSelector Nothing       (Just id') = ["noteId" =: id']
+  makeSelector (Just title') Nothing    = ["title" =: title']
+  makeSelector Nothing       Nothing    = []
 
-
-dbDocFromMaybe :: Maybe DB.Document -> Either String (Identity DB.Document)
-dbDocFromMaybe (Just doc) = Right $ return doc
-dbDocFromMaybe Nothing    = Left "No result found"
+eitherDocFromMaybe :: Maybe DB.Document -> Either String (Identity DB.Document)
+eitherDocFromMaybe (Just doc) = Right $ return doc
+eitherDocFromMaybe Nothing    = Left "No result found"
 
 docToNote :: DB.Document -> Note
 docToNote doc = Note { noteId     = docId
@@ -93,12 +103,12 @@ docToNote doc = Note { noteId     = docId
                      , modifyDate = docModDate
                      , content    = docContent
                      }
-  where
-    docId      = typed $ valueAt "noteId" doc
-    docTitle   = typed $ valueAt "title" doc
-    docCreDate = typed $ valueAt "createDate" doc
-    docModDate = typed $ valueAt "modifyDate" doc
-    docContent = typed $ valueAt "content" doc
+ where
+  docId      = typed $ valueAt "noteId" doc
+  docTitle   = typed $ valueAt "title" doc
+  docCreDate = typed $ valueAt "createDate" doc
+  docModDate = typed $ valueAt "modifyDate" doc
+  docContent = typed $ valueAt "content" doc
 
 -- docTo :: Constr -> DB.Document -> Note
 -- docTo constr doc = docTo' constrList doc constr
