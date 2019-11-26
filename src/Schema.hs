@@ -11,43 +11,54 @@ module Schema
   , Mutation(..)
   , getNote
   , getNotes
+  , createNote
   )
 where
 
 import           Data.Morpheus.Types            ( GQLType(..)
                                                 , IORes
+                                                , IOMutRes
                                                 , liftEitherM
                                                 )
 import           Data.Morpheus.Kind             ( OBJECT )
 import           GHC.Generics                   ( Generic )
 import qualified Database.MongoDB              as DB
+import           Data.Maybe                     ( fromJust )
 import           Data.Data                      ( Constr
                                                 , constrFields
                                                 )
 import           Control.Monad.Identity
-import           Data.Text                      ( Text )
+import           Data.Text                      ( Text
+                                                , pack
+                                                , unpack
+                                                )
 import           Data.Bson                      ( Value
+                                                , ObjectId
+                                                , Value(String)
                                                 , valueAt
                                                 , typed
+                                                , cast'
+                                                , (!?)
                                                 )
 
 -- infix is awkward with a qualifier
 (=:) :: DB.Val v => DB.Label -> v -> DB.Field
 (=:) = (DB.=:)
 
+-- TODO: consider having func for each query param (noteById, noteByTitle)
 data Query m = Query { note :: NoteArgs -> m Note
                      , notes :: () -> m [Note]
                      } deriving (Generic, GQLType)
 
-data Mutation m = Mutation { addNote :: Note -> m Note
-                           , updateNote :: Note -> m Note
-                           , deleteNote :: Text -> m Note
+data Mutation m = Mutation { addNote :: Note -> m Text
+                          --  , updateNote :: Note -> m ()
+                          --  , deleteNote :: Text -> m ()
                            } deriving (Generic, GQLType)
 
-data Note = Note { noteId :: Text
+data Note = Note { noteId :: Maybe Text
                  , title   :: Text
-                 , createDate  :: Text
-                 , modifyDate :: Text
+                 , createDate  :: Maybe Text
+                 , modifyDate :: Maybe Text
                  , content :: Text
                  } deriving (Generic)
 
@@ -66,6 +77,11 @@ getNote NoteArgs { nTitle, nId } = liftEitherM $ do
 getNotes :: () -> IORes () [Note]
 getNotes () = liftEitherM $ runQuery getAllNotes
 
+createNote :: Note -> IOMutRes e Text
+createNote note' = liftEitherM $ do
+  n <- runQuery $ insertNote note'
+  return $ runIdentity <$> n
+
 runQuery
   :: (Monad m) => DB.Action IO (Either String (m a)) -> IO (Either String (m a))
 runQuery act = do
@@ -81,16 +97,26 @@ getAllNotes = do
 
 getNoteByProp
   :: Maybe Text -> Maybe Text -> DB.Action IO (Either String (Identity Note))
-getNoteByProp title noteId = do -- inside the Action IO monad
+getNoteByProp title noteId = do -- inside the Action monad
   maybeNoteDoc <- DB.findOne (DB.select (makeSelector title noteId) "notes")
   return $ do -- inside the Either monad
     idDoc <- eitherDocFromMaybe maybeNoteDoc
     return $ docToNote <$> idDoc
  where
-  makeSelector (Just title') (Just id') = ["title" =: title', "noteId" =: id']
-  makeSelector Nothing       (Just id') = ["noteId" =: id']
-  makeSelector (Just title') Nothing    = ["title" =: title']
-  makeSelector Nothing       Nothing    = []
+  makeSelector (Just title') (Just id') =
+    ["title" =: title', "_id" =: (read $ unpack id' :: ObjectId)]
+  makeSelector Nothing (Just id') =
+    ["_id" =: (read $ unpack id' :: ObjectId)]
+  makeSelector (Just title') Nothing = ["title" =: title']
+  makeSelector Nothing       Nothing = []
+
+insertNote :: Note -> DB.Action IO (Either String (Identity Text))
+insertNote note' = do
+  id' <- DB.insert "notes" doc
+  return $ Right $ return (pack $ show id' :: Text)
+ where
+  doc =
+    noteToDoc note' { createDate = Just "today", modifyDate = Just "today" }
 
 eitherDocFromMaybe :: Maybe DB.Document -> Either String (Identity DB.Document)
 eitherDocFromMaybe (Just doc) = Right $ return doc
@@ -104,11 +130,25 @@ docToNote doc = Note { noteId     = docId
                      , content    = docContent
                      }
  where
-  docId      = typed $ valueAt "noteId" doc
+  docId      = fmap (pack . show) (doc !? "_id" :: Maybe DB.Value) :: Maybe Text
   docTitle   = typed $ valueAt "title" doc
-  docCreDate = typed $ valueAt "createDate" doc
-  docModDate = typed $ valueAt "modifyDate" doc
+  docCreDate = typed <$> doc !? "createDate"
+  docModDate = typed <$> doc !? "modifyDate"
   docContent = typed $ valueAt "content" doc
+
+noteToDoc :: Note -> DB.Document
+noteToDoc Note { noteId = nId, title = nTitle, createDate = nCDate, modifyDate = nMDate, content = nContent }
+  = idDoc ++ cDateDoc ++ mDateDoc ++ ["title" =: nTitle, "content" =: nContent]
+ where
+  idDoc = case nId of
+    Just id' -> ["_id" =: (read (unpack id') :: ObjectId)]
+    Nothing  -> []
+  cDateDoc = case nCDate of
+    Just nCDate' -> ["createDate" =: nCDate']
+    Nothing      -> []
+  mDateDoc = case nMDate of
+    Just nMDate' -> ["modifyDate" =: nMDate']
+    Nothing      -> []
 
 -- docTo :: Constr -> DB.Document -> Note
 -- docTo constr doc = docTo' constrList doc constr

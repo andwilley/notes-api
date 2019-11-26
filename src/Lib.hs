@@ -26,14 +26,16 @@ import qualified Database.MongoDB              as DB
 import           Data.Maybe
 import           Control.Monad.Reader           ( runReader )
 import           Schema                         ( Query(..)
+                                                , Mutation(..)
                                                 , getNote
                                                 , getNotes
+                                                , createNote
                                                 )
 
-rootResolver :: GQLRootResolver IO () Query Undefined Undefined
+rootResolver :: GQLRootResolver IO () Query Mutation Undefined
 rootResolver = GQLRootResolver
   { queryResolver        = Query { note = getNote, notes = getNotes }
-  , mutationResolver     = undefined
+  , mutationResolver     = Mutation { addNote = createNote }
   , subscriptionResolver = undefined
   }
 
