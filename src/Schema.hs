@@ -12,6 +12,7 @@ module Schema
   , getNote
   , getNotes
   , createNote
+  , changeNote
   )
 where
 
@@ -38,7 +39,6 @@ import           Data.Bson                      ( Value
                                                 , Value(String)
                                                 , valueAt
                                                 , typed
-                                                , cast'
                                                 , (!?)
                                                 )
 import           Note
@@ -71,7 +71,9 @@ createNote note' = liftEitherM $ do
   return $ runIdentity <$> n
 
 changeNote :: UpdateNote -> IOMutRes e Note
-changeNote note = undefined
+changeNote note = liftEitherM $ do
+  n <- runQuery $ saveNote note
+  return $ runIdentity <$> n
 
 runQuery
   :: (Monad m) => DB.Action IO (Either String (m a)) -> IO (Either String (m a))
@@ -108,21 +110,16 @@ insertNote newNote = do
   return $ Right $ return madeNote'
   where madeNote = makeNote newNote
 
-liftNoteIO
-  :: DB.Action IO (Either String (Identity (IO Note)))
-  -> DB.Action IO (Either String (Identity Note))
-liftNoteIO = undefined
-
-saveNote :: Note -> DB.Action IO (Either String (Identity Note))
-saveNote note'@Note { noteId = Just nId' } = do
-  maybeNoteDoc <- DB.findOne (DB.select ["_id" =: nId'] "notes")
+saveNote :: UpdateNote -> DB.Action IO (Either String (Identity Note))
+saveNote note'@UpdateNote { updateId = nId' } = do
+  maybeNoteDoc <- DB.findOne
+    (DB.select ["_id" =: (read $ unpack nId' :: ObjectId)] "notes")
   case maybeNoteDoc of
     Just noteDoc -> do
-      DB.save "notes" $ noteToDoc note' -- this is not what I want, note' is a partial record, need to merge these
-      return $ Right $ return note'
+      updatedNote <- liftIO $ mergeNote (docToNote noteDoc) note'
+      DB.save "notes" $ noteToDoc updatedNote
+      return $ Right $ return updatedNote
     Nothing -> return $ Left "record not found"
-saveNote Note { noteId = Nothing } =
-  return $ Left "id field needed for update operation"
 
 eitherDocFromMaybe :: Maybe DB.Document -> Either String (Identity DB.Document)
 eitherDocFromMaybe (Just doc) = Right $ return doc
