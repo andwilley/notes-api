@@ -28,6 +28,8 @@ dependencies:
   - mongoDB
   - mtl
   - bson
+  - time
+  - iso8601-time
 
 library:
   source-dirs: src
