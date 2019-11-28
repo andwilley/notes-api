@@ -24,18 +24,11 @@ import           Data.Morpheus.Types            ( GQLType(..)
                                                 , IOMutRes
                                                 , liftEitherM
                                                 )
-import           Data.Morpheus                  ( interpreter )
-import           Data.Morpheus.Document         ( importGQLDocumentWithNamespace
-                                                )
 import           Data.Morpheus.Kind             ( OBJECT )
 import           GHC.Generics                   ( Generic )
 import qualified Database.MongoDB              as DB
-import           Data.Maybe                     ( fromJust )
-import           Data.Data                      ( Constr
-                                                , constrFields
-                                                )
 import           Control.Monad.Identity
-import           Control.Monad.IO.Class
+import           Control.Monad.IO.Class         ( liftIO )
 import           Data.Text                      ( Text
                                                 , pack
                                                 , unpack
@@ -47,10 +40,8 @@ import           Data.Bson                      ( Value
                                                 , Value(String, ObjId)
                                                 , valueAt
                                                 , typed
-                                                , (!?)
                                                 )
 import           Note
-import           Control.Exception
 
 -- infix is awkward with a qualifier
 (=:) :: DB.Val v => DB.Label -> v -> DB.Field

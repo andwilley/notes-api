@@ -28,16 +28,16 @@ import           Data.Text                      ( Text
                                                 , pack
                                                 , unpack
                                                 )
-import           Data.Maybe                     ( fromMaybe
-                                                , isJust
-                                                , fromJust
-                                                )
+import           Data.Maybe                     ( fromMaybe )
 import           Data.Bson                      ( valueAt )
 import           Data.Time.ISO8601              ( parseISO8601
                                                 , formatISO8601
                                                 )
 import           Data.Time
 import           Data.Time.Clock.POSIX          ( posixSecondsToUTCTime )
+import           Data.Data                      ( Constr
+                                                , constrFields
+                                                )
 
 data Note = Note { noteId :: Maybe Text
                  , noteTitle   :: Text
