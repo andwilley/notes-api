@@ -31,13 +31,15 @@ import           Schema                         ( Query(..)
                                                 , getNotes
                                                 , createNote
                                                 , changeNote
+                                                , removeNotes
                                                 )
 
 rootResolver :: GQLRootResolver IO () Query Mutation Undefined
 rootResolver = GQLRootResolver
   { queryResolver        = Query { note = getNote, notes = getNotes }
-  , mutationResolver     = Mutation { addNote    = createNote
-                                    , updateNote = changeNote
+  , mutationResolver     = Mutation { addNote     = createNote
+                                    , updateNote  = changeNote
+                                    , deleteNotes = removeNotes
                                     }
   , subscriptionResolver = undefined
   }

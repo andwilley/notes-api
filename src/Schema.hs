@@ -2,9 +2,11 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE DeriveGeneric         #-}
 {-# LANGUAGE NamedFieldPuns        #-}
+{-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE TypeFamilies          #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
 
 module Schema
   ( Query(..)
@@ -13,6 +15,7 @@ module Schema
   , getNotes
   , createNote
   , changeNote
+  , removeNotes
   )
 where
 
@@ -20,6 +23,9 @@ import           Data.Morpheus.Types            ( GQLType(..)
                                                 , IORes
                                                 , IOMutRes
                                                 , liftEitherM
+                                                )
+import           Data.Morpheus                  ( interpreter )
+import           Data.Morpheus.Document         ( importGQLDocumentWithNamespace
                                                 )
 import           Data.Morpheus.Kind             ( OBJECT )
 import           GHC.Generics                   ( Generic )
@@ -34,14 +40,17 @@ import           Data.Text                      ( Text
                                                 , pack
                                                 , unpack
                                                 )
+import qualified Data.Text                     as T
+                                                ( length )
 import           Data.Bson                      ( Value
                                                 , ObjectId
-                                                , Value(String)
+                                                , Value(String, ObjId)
                                                 , valueAt
                                                 , typed
                                                 , (!?)
                                                 )
 import           Note
+import           Control.Exception
 
 -- infix is awkward with a qualifier
 (=:) :: DB.Val v => DB.Label -> v -> DB.Field
@@ -54,12 +63,12 @@ data Query m = Query { note :: NoteArgs -> m Note
 
 data Mutation m = Mutation { addNote :: NewNote -> m Note
                            , updateNote :: UpdateNote -> m Note
-                          --  , deleteNote :: Text -> m ()
+                           , deleteNotes :: NoteIdList -> m [Note]
                            } deriving (Generic, GQLType)
 
 getNote :: NoteArgs -> IORes e Note
-getNote NoteArgs { nTitle, nId } = liftEitherM $ do
-  eitherNote <- runQuery $ getNoteByProp nTitle nId
+getNote NoteArgs { title, noteid } = liftEitherM $ do
+  eitherNote <- runQuery $ getNoteByProp title noteid
   return $ runIdentity <$> eitherNote
 
 getNotes :: () -> IORes () [Note]
@@ -74,6 +83,9 @@ changeNote :: UpdateNote -> IOMutRes e Note
 changeNote note = liftEitherM $ do
   n <- runQuery $ saveNote note
   return $ runIdentity <$> n
+
+removeNotes :: NoteIdList -> IOMutRes e [Note]
+removeNotes ids = liftEitherM $ runQuery $ delNotes $ noteIdList ids
 
 runQuery
   :: (Monad m) => DB.Action IO (Either String (m a)) -> IO (Either String (m a))
@@ -97,10 +109,10 @@ getNoteByProp title noteId = do -- inside the Action monad
     return $ docToNote <$> idDoc
  where
   makeSelector (Just title') (Just id') =
-    ["title" =: title', "_id" =: (read $ unpack id' :: ObjectId)]
-  makeSelector Nothing (Just id') = ["_id" =: (read $ unpack id' :: ObjectId)]
-  makeSelector (Just title') Nothing = ["title" =: title']
-  makeSelector Nothing Nothing = []
+    ["title" =: title', "_id" =: readIdOrEmpty id']
+  makeSelector Nothing       (Just id') = ["_id" =: readIdOrEmpty id']
+  makeSelector (Just title') Nothing    = ["title" =: title']
+  makeSelector Nothing       Nothing    = []
 
 insertNote :: NewNote -> DB.Action IO (Either String (Identity Note))
 insertNote newNote = do
@@ -112,8 +124,7 @@ insertNote newNote = do
 
 saveNote :: UpdateNote -> DB.Action IO (Either String (Identity Note))
 saveNote note'@UpdateNote { updateId = nId' } = do
-  maybeNoteDoc <- DB.findOne
-    (DB.select ["_id" =: (read $ unpack nId' :: ObjectId)] "notes")
+  maybeNoteDoc <- DB.findOne (DB.select ["_id" =: readIdOrEmpty nId'] "notes")
   case maybeNoteDoc of
     Just noteDoc -> do
       updatedNote <- liftIO $ mergeNote (docToNote noteDoc) note'
@@ -121,11 +132,19 @@ saveNote note'@UpdateNote { updateId = nId' } = do
       return $ Right $ return updatedNote
     Nothing -> return $ Left "record not found"
 
+delNotes :: [Text] -> DB.Action IO (Either String [Note])
+delNotes ids = do
+  delNotes <- DB.rest =<< DB.find sels
+  s        <- DB.delete selq
+  return $ Right $ map docToNote delNotes
+ where
+  orIds = ["$or" =: map (\id' -> ["_id" =: readIdOrEmpty id']) ids]
+  selq  = DB.select orIds "notes"
+  sels  = DB.select orIds "notes"
+
 eitherDocFromMaybe :: Maybe DB.Document -> Either String (Identity DB.Document)
 eitherDocFromMaybe (Just doc) = Right $ return doc
 eitherDocFromMaybe Nothing    = Left "No result found"
-
-
 
 -- docTo :: Constr -> DB.Document -> Note
 -- docTo constr doc = docTo' constrList doc constr
@@ -137,3 +156,7 @@ eitherDocFromMaybe Nothing    = Left "No result found"
 
 
     -- Note (Just "title1") "cDate1" "mDate1" "content1"
+
+readIdOrEmpty :: Text -> Value
+readIdOrEmpty id' | T.length id' == 24 = ObjId (read $ unpack id' :: ObjectId)
+                  | otherwise          = String ""

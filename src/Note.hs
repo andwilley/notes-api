@@ -1,12 +1,15 @@
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE DeriveGeneric         #-}
 {-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
 
 module Note
   ( Note(..)
   , NewNote(..)
   , UpdateNote(..)
   , NoteArgs(..)
+  , NoteIdList(..)
   , mergeNote
   , makeNote
   , noteToDoc
@@ -52,9 +55,11 @@ data UpdateNote = UpdateNote { updateId :: Text
 instance GQLType Note where
   type KIND Note = OBJECT
 
-data NoteArgs = NoteArgs { nTitle :: Maybe Text
-                         , nId :: Maybe Text
+data NoteArgs = NoteArgs { title :: Maybe Text
+                         , noteid :: Maybe Text
                          } deriving (Show, Generic)
+
+newtype NoteIdList = NoteIdList {noteIdList :: [Text]} deriving (Show, Generic)
 
 makeNote :: NewNote -> IO Note
 makeNote NewNote { newTitle = nTitle, newContent = nContent } = do
@@ -87,15 +92,15 @@ mergeNote note1@Note { noteId = nId1, noteTitle = nTitle1, noteCreateDate = nCDa
 docToNote :: DB.Document -> Note
 docToNote doc = Note { noteId         = docId
                      , noteTitle      = docTitle
-                     , noteCreateDate = pack $ show $ fromMaybe "" docCreDate
-                     , noteModifyDate = pack $ show $ fromMaybe "" docModDate
+                     , noteCreateDate = pack docCreDate
+                     , noteModifyDate = pack docModDate
                      , noteContent    = docContent
                      }
  where
   docId      = pack . show <$> (doc !? "_id" :: Maybe DB.Value) :: Maybe Text
   docTitle   = typed $ valueAt "noteTitle" doc
-  docCreDate = pack . show <$> parseISO8601 (typed $ valueAt "noteCreateDate" doc)
-  docModDate = pack . show <$> parseISO8601 (typed $ valueAt "noteModifyDate" doc)
+  docCreDate = typed $ valueAt "noteCreateDate" doc
+  docModDate = typed $ valueAt "noteModifyDate" doc
   docContent = typed $ valueAt "noteContent" doc
 
 -- this is also not typesafe (string literals)
