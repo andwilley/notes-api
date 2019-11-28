@@ -116,10 +116,10 @@ getNoteByProp title noteId = do -- inside the Action monad
 
 insertNote :: NewNote -> DB.Action IO (Either String (Identity Note))
 insertNote newNote = do
-  doc       <- liftIO $ noteToDoc <$> madeNote
-  id'       <- DB.insert "notes" doc
-  madeNote' <- liftIO $ updateNoteId (pack $ show id') <$> madeNote
-  return $ Right $ return madeNote'
+  doc <- liftIO $ updateNoteCreateDate =<< updateNoteModifyDate
+    (noteToDoc madeNote)
+  id' <- DB.insert "notes" doc
+  return $ Right $ return $ updateNoteId (pack $ show id') (docToNote doc)
   where madeNote = makeNote newNote
 
 saveNote :: UpdateNote -> DB.Action IO (Either String (Identity Note))
@@ -127,9 +127,10 @@ saveNote note'@UpdateNote { updateId = nId' } = do
   maybeNoteDoc <- DB.findOne (DB.select ["_id" =: readIdOrEmpty nId'] "notes")
   case maybeNoteDoc of
     Just noteDoc -> do
-      updatedNote <- liftIO $ mergeNote (docToNote noteDoc) note'
-      DB.save "notes" $ noteToDoc updatedNote
-      return $ Right $ return updatedNote
+      let updatedNote = mergeNote (docToNote noteDoc) note'
+      note' <- liftIO $ updateNoteModifyDate $ noteToDoc updatedNote
+      DB.save "notes" note'
+      return $ Right $ return (docToNote note')
     Nothing -> return $ Left "record not found"
 
 delNotes :: [Text] -> DB.Action IO (Either String [Note])
@@ -145,17 +146,6 @@ delNotes ids = do
 eitherDocFromMaybe :: Maybe DB.Document -> Either String (Identity DB.Document)
 eitherDocFromMaybe (Just doc) = Right $ return doc
 eitherDocFromMaybe Nothing    = Left "No result found"
-
--- docTo :: Constr -> DB.Document -> Note
--- docTo constr doc = docTo' constrList doc constr
---     where constrList = constrFields constr
-
--- docTo' :: [String] -> DB.Document -> Constr -> Note
--- docTo' [field         ] doc constr = constr $ valueAt field doc
--- docTo' (field : fields) doc constr = "field"
-
-
-    -- Note (Just "title1") "cDate1" "mDate1" "content1"
 
 readIdOrEmpty :: Text -> Value
 readIdOrEmpty id' | T.length id' == 24 = ObjId (read $ unpack id' :: ObjectId)
