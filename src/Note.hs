@@ -10,11 +10,16 @@ module Note
   , UpdateNote(..)
   , NoteArgs(..)
   , NoteIdList(..)
+  , noteId'
+  , noteTitle'
+  , noteContent'
+  , noteCreateDate'
+  , noteModifyDate'
+  , setNoteId
   , mergeNote
   , makeNote
   , noteToDoc
   , docToNote
-  , updateNoteId
   , updateNoteCreateDate
   , updateNoteModifyDate
   )
@@ -38,6 +43,9 @@ import           Data.Time.Clock.POSIX          ( posixSecondsToUTCTime )
 import           Data.Data                      ( Constr
                                                 , constrFields
                                                 )
+import           Lens.Simple
+
+-- entities
 
 data Note = Note { noteId :: Maybe Text
                  , noteTitle   :: Text
@@ -45,6 +53,38 @@ data Note = Note { noteId :: Maybe Text
                  , noteModifyDate :: Text
                  , noteContent :: Text
                  } deriving (Show, Generic)
+
+instance GQLType Note where
+  type KIND Note = OBJECT
+
+-- lenses
+
+noteId' :: Lens' Note (Maybe Text)
+noteId' = lens noteId (\note newId -> note { noteId = newId })
+
+noteTitle' :: Lens' Note Text
+noteTitle' = lens noteTitle (\note newTitle -> note { noteTitle = newTitle })
+
+noteCreateDate' :: Lens' Note Text
+noteCreateDate' = lens
+  noteCreateDate
+  (\note newCreateDate -> note { noteCreateDate = newCreateDate })
+
+noteModifyDate' :: Lens' Note Text
+noteModifyDate' = lens
+  noteModifyDate
+  (\note newModifyDate -> note { noteModifyDate = newModifyDate })
+
+noteContent' :: Lens' Note Text
+noteContent' =
+  lens noteContent (\note newContent -> note { noteContent = newContent })
+
+-- getters and setters
+
+setNoteId :: Text -> Note -> Note
+setNoteId newId = over noteId' (const $ Just newId)
+
+-- query params
 
 data NewNote = NewNote { newTitle :: Text
                        , newContent :: Text
@@ -55,14 +95,13 @@ data UpdateNote = UpdateNote { updateId :: Text
                              , maybeNoteContent :: Maybe Text
                              } deriving (Show, Generic)
 
-instance GQLType Note where
-  type KIND Note = OBJECT
-
 data NoteArgs = NoteArgs { title :: Maybe Text
                          , noteid :: Maybe Text
                          } deriving (Show, Generic)
 
 newtype NoteIdList = NoteIdList {noteIdList :: [Text]} deriving (Show, Generic)
+
+-- utilities
 
 makeNote :: NewNote -> Note
 makeNote NewNote { newTitle = nTitle, newContent = nContent } = Note
@@ -73,14 +112,10 @@ makeNote NewNote { newTitle = nTitle, newContent = nContent } = Note
   , noteContent    = nContent
   }
 
-updateNoteId :: Text -> Note -> Note
-updateNoteId newId note = note { noteId = Just newId }
-
 updateNoteCreateDate :: DB.Document -> IO DB.Document
 updateNoteCreateDate doc = do
   timeNow <- getCurrentTime
   return $ merge ["noteCreateDate" =: timeNow] doc
-
 
 updateNoteModifyDate :: DB.Document -> IO DB.Document
 updateNoteModifyDate doc = do

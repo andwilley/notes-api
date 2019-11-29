@@ -30,6 +30,7 @@ dependencies:
   - bson
   - time
   - iso8601-time
+  - lens-simple
 
 library:
   source-dirs: src

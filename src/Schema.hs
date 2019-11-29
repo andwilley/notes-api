@@ -42,6 +42,7 @@ import           Data.Bson                      ( Value
                                                 , typed
                                                 )
 import           Note
+import           Lens.Simple
 
 -- infix is awkward with a qualifier
 (=:) :: DB.Val v => DB.Label -> v -> DB.Field
@@ -57,27 +58,6 @@ data Mutation m = Mutation { addNote :: NewNote -> m Note
                            , deleteNotes :: NoteIdList -> m [Note]
                            } deriving (Generic, GQLType)
 
-getNote :: NoteArgs -> IORes e Note
-getNote NoteArgs { title, noteid } = liftEitherM $ do
-  eitherNote <- runQuery $ getNoteByProp title noteid
-  return $ runIdentity <$> eitherNote
-
-getNotes :: () -> IORes () [Note]
-getNotes () = liftEitherM $ runQuery getAllNotes
-
-createNote :: NewNote -> IOMutRes e Note
-createNote note' = liftEitherM $ do
-  n <- runQuery $ insertNote note'
-  return $ runIdentity <$> n
-
-changeNote :: UpdateNote -> IOMutRes e Note
-changeNote note = liftEitherM $ do
-  n <- runQuery $ saveNote note
-  return $ runIdentity <$> n
-
-removeNotes :: NoteIdList -> IOMutRes e [Note]
-removeNotes ids = liftEitherM $ runQuery $ delNotes $ noteIdList ids
-
 runQuery
   :: (Monad m) => DB.Action IO (Either String (m a)) -> IO (Either String (m a))
 runQuery act = do
@@ -86,10 +66,12 @@ runQuery act = do
   DB.close pipe
   return e
 
-getAllNotes :: DB.Action IO (Either String [Note])
-getAllNotes = do
-  noteDocList <- DB.rest =<< DB.find (DB.select [] "notes")
-  return $ Right $ map docToNote noteDocList
+-- read
+
+getNote :: NoteArgs -> IORes e Note
+getNote NoteArgs { title, noteid } = liftEitherM $ do
+  eitherNote <- runQuery $ getNoteByProp title noteid
+  return $ runIdentity <$> eitherNote
 
 getNoteByProp
   :: Maybe Text -> Maybe Text -> DB.Action IO (Either String (Identity Note))
@@ -105,13 +87,35 @@ getNoteByProp title noteId = do -- inside the Action monad
   makeSelector (Just title') Nothing    = ["title" =: title']
   makeSelector Nothing       Nothing    = []
 
+getNotes :: () -> IORes () [Note]
+getNotes () = liftEitherM $ runQuery getAllNotes
+
+getAllNotes :: DB.Action IO (Either String [Note])
+getAllNotes = do
+  noteDocList <- DB.rest =<< DB.find (DB.select [] "notes")
+  return $ Right $ map docToNote noteDocList
+
+-- create
+
+createNote :: NewNote -> IOMutRes e Note
+createNote note' = liftEitherM $ do
+  n <- runQuery $ insertNote note'
+  return $ runIdentity <$> n
+
 insertNote :: NewNote -> DB.Action IO (Either String (Identity Note))
 insertNote newNote = do
   doc <- liftIO $ updateNoteCreateDate =<< updateNoteModifyDate
     (noteToDoc madeNote)
   id' <- DB.insert "notes" doc
-  return $ Right $ return $ updateNoteId (pack $ show id') (docToNote doc)
+  return $ Right $ return $ setNoteId (pack $ show id') (docToNote doc)
   where madeNote = makeNote newNote
+
+-- update
+
+changeNote :: UpdateNote -> IOMutRes e Note
+changeNote note = liftEitherM $ do
+  n <- runQuery $ saveNote note
+  return $ runIdentity <$> n
 
 saveNote :: UpdateNote -> DB.Action IO (Either String (Identity Note))
 saveNote note'@UpdateNote { updateId = nId' } = do
@@ -124,6 +128,11 @@ saveNote note'@UpdateNote { updateId = nId' } = do
       return $ Right $ return (docToNote note')
     Nothing -> return $ Left "record not found"
 
+-- delete
+
+removeNotes :: NoteIdList -> IOMutRes e [Note]
+removeNotes ids = liftEitherM $ runQuery $ delNotes $ noteIdList ids
+
 delNotes :: [Text] -> DB.Action IO (Either String [Note])
 delNotes ids = do
   delNotes <- DB.rest =<< DB.find sels
@@ -133,6 +142,8 @@ delNotes ids = do
   orIds = ["$or" =: map (\id' -> ["_id" =: readIdOrEmpty id']) ids]
   selq  = DB.select orIds "notes"
   sels  = DB.select orIds "notes"
+
+-- utilities
 
 eitherDocFromMaybe :: Maybe DB.Document -> Either String (Identity DB.Document)
 eitherDocFromMaybe (Just doc) = Right $ return doc
