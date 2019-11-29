@@ -48,7 +48,7 @@ import           Lens.Simple
 (=:) :: DB.Val v => DB.Label -> v -> DB.Field
 (=:) = (DB.=:)
 
--- TODO: consider having func for each query param (noteById, noteByTitle)
+-- TODO: consider having func for each query param (noteById, noteByTitle, noteDateRange)
 data Query m = Query { note :: NoteArgs -> m Note
                      , notes :: () -> m [Note]
                      } deriving (Generic, GQLType)
