@@ -31,6 +31,8 @@ dependencies:
   - time
   - iso8601-time
   - lens-simple
+  - http-types
+  - containers
 
 library:
   source-dirs: src

@@ -13,7 +13,7 @@ note(
 notes: [Note!]!
 ```
 
-## Mutation
+### Mutation
 
 ```graphql
 addNote(
@@ -30,4 +30,22 @@ updateNote(
 deleteNotes(
   noteIdList: [String!]!
 ): [Note!]!
+```
+
+## Usage
+
+Requires definition of src/Apikeys.hs
+
+```haskell
+{-# LANGUAGE OverloadedStrings     #-}
+
+module Apikeys (apikeys) where
+
+import qualified Data.Set as Set
+import qualified Data.Text.Lazy as TL
+
+apikeys :: Set.Set TL.Text
+apikeys = Set.fromList [ "test"
+                       , "test2"
+                       ]
 ```
