@@ -10,7 +10,6 @@ import           Web.Scotty.Internal.Types
 
 main :: IO ()
 main =
-    scotty 3000
-        $   post (Literal $ TL.pack "/api")
-        $   raw
-        =<< (liftIO . runApi =<< body)
+    scotty 8080
+        $   post (Literal $ TL.pack "/notes")
+        $   raw =<< (liftIO . runApi =<< body)
